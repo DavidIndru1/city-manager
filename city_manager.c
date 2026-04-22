@@ -71,14 +71,14 @@ void init_district_files(const char *district_name) {
 void add(char *district_name, char *user_name) {
     report r = {0}; //initializez toata structura cu 0
 
-    strncpy(r.inspector_name, district_name, sizeof(r.inspector_name)-1);//copiez numele
+    strncpy(r.inspector_name, user_name, sizeof(r.inspector_name)-1);//copiez numele
     //pt siguranta ca asa am loc si de \0, folosesc strncpy
     r.timestamp = time(NULL);//citim timpul actual => o sa fie un nr dubios
 
     char path[256];
     sprintf(path, "%s/reports.dat", district_name);
 
-    struct stat st = {0};
+    struct stat st = {0};//statisticile fisierul
     if (stat(path, &st) == 0) {//citim detaliile fisierului.
         r.id = (st.st_size / sizeof(report)) + 1;//daca fisierul are 208 bytes, inseamna ca are un singur raport in el
         //+1 si obtinem ID-ul 2 pentru noul nostru raport
@@ -171,7 +171,7 @@ void list(char *district_name) {
     while (read(fd, &r, sizeof(report)) == sizeof(report)) {
         count++;
         printf("--- Raport ID: %d ---\n", r.id);
-        printf("Inspector : %s\n", r.inspector_name);
+        printf("User name : %s\n", r.inspector_name);
         printf("Categorie : %s (Severitate: %d)\n", r.issue_category, r.severity);
         printf("GPS       : [%.4f, %.4f]\n", r.latitude, r.longitude);
 
