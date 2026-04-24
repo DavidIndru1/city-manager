@@ -145,7 +145,7 @@ void list(char *district_name) {
 
     struct stat st = {0};
     if (stat(path, &st) == -1) {
-        printf("eroare functia view, nu s-a putut citi informatii despre %s\n",path);
+        printf("eroare functia list, nu s-a putut citi informatii despre %s\n",path);
         exit(-1);
     }
 
@@ -187,6 +187,104 @@ void list(char *district_name) {
     if (count == 0) {
         printf("nu exista rapoarte in districtul %s.\n",district_name);
     }
+    close(fd);
+}
+
+void view(char *district_name, int report_id) {
+    char path[256];
+    sprintf(path, "%s/reports.dat", district_name);
+
+    int fd = open(path, O_RDONLY);
+    if (fd == -1) {
+        printf("eroare la view! nu s-a putut deschide fisierul!!!\n");
+        exit(-1);
+    }
+
+    report r = {0};
+    int found = 0;//o variabila pentru cand am gasit id-ul
+
+    //citesc structura cu structura (208 bytes)
+    while (read(fd, &r, sizeof(report)) == sizeof(report)) {
+        if (r.id == report_id) {
+            found = 1;//l-am gasit!
+
+            printf("=== Detalii Raport ID: %d ===\n",r.id);
+            printf("Inspector : %s\n",r.inspector_name);
+            printf("Categorie : %s (Severitate: %d)\n", r.issue_category,r.severity);
+            printf("GPS       : [%.4f, %.4f]\n", r.latitude, r.longitude);
+
+            //am sa tai '\n' adaugat de ctime
+            char time_str[64];
+            strcpy(time_str, ctime(&r.timestamp));
+            time_str[strcspn(time_str, "\n")] = '\0';
+
+            printf("Data      : %s\n", time_str);
+            printf("Descriere : %s\n", r.description);
+            printf("=============================\n");
+
+            break;//opresc bucla fortat
+        }
+    }
+    if (found == 0) {
+        printf("eroare! raportul cu id-ul %d nu exista in districtul %s.\n",report_id,district_name);
+    }
+    close(fd);
+}
+
+void remove_report(char *district_name, int report_id) {
+    char path[256];
+    sprintf(path, "%s/reports.dat", district_name);
+
+    int fd = open(path, O_RDWR);
+    if (fd == -1) {
+        printf("eroare la deschiderea reports.dat pentru stergere!!\n");
+        exit(-1);
+    }
+
+    struct stat st = {0};
+    fstat(fd, &st);
+    off_t file_size = st.st_size; //salvez marimea in bytes
+
+    report r = {0};
+    int found = 0;
+    off_t target_offset = 0;//aici salvez pozitia unde e raportul gasit
+
+    while (read(fd, &r, sizeof(report)) == sizeof(report)) {
+        if (r.id == report_id) {
+            found = 1;
+            //daca l-am gasit, salvez pozitia unde a inceput in fisier
+            //lseek cu SEEK_CUR ne da pozitia curenta
+            //scad marimea unui raport ca sa aflu pozitia de inceput a lui
+            target_offset = lseek(fd, 0, SEEK_CUR) - sizeof(report);
+            break;
+        }
+    }
+    if (found == 0) {
+        printf("eroare, nu am gasit raportul cu ID-ul %d in districtul %s.\n",report_id,district_name);
+        close(fd);
+        return;
+    }
+    //o sa am 2 cursoare, read_offset de unde citesc, write_offset de unde
+    off_t write_offset = target_offset;//incep sa suprascriu de la raportul sters
+    off_t read_offset = target_offset + sizeof(report);//incep sa citesc de la urmatorul raport
+
+    //cat timp mai am rapoarte citesc pana la finalul fisierului
+    while (read_offset < file_size) {
+        //mut cursorul la raportul urmator si il citesc in memorie
+        lseek(fd, read_offset, SEEK_SET);
+        read(fd, &r, sizeof(report));
+
+        //mut cursorul inapoi cu o pozitie si il scriu peste cel vechi
+        lseek(fd, write_offset, SEEK_SET);
+        write(fd, &r, sizeof(report));
+
+        //avansez ambele cursoare pentru urmatorul pas al buclei
+        read_offset += sizeof(report);
+        write_offset += sizeof(report);
+    }
+    ftruncate(fd, file_size - sizeof(report));
+    //fisierul are un raport duplicat la final, il tai stergand fix 208 bytes din marimea totala
+    printf("Fisierul cu ID-ul %d a fost sters.\n",report_id);
     close(fd);
 }
 
@@ -247,7 +345,7 @@ int main(int argc, char *argv[])
         }
         int report_id = atoi(argv[7]);//convertim din text in numar
         printf("Comanda remove_report cu ID-ul %d.\n",report_id);
-        //functia remove_report
+        remove_report(target_district, report_id);
     }
     else if (strcmp(command, "--update_threshold") == 0) {
         if (argc < 8) {
