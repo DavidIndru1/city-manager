@@ -274,6 +274,9 @@ void remove_report(char *district_name, int report_id) {
         lseek(fd, read_offset, SEEK_SET);
         read(fd, &r, sizeof(report));
 
+        //scad id-ul ca sa umplu gaura lasata de raportul sters
+        r.id = r.id - 1;
+
         //mut cursorul inapoi cu o pozitie si il scriu peste cel vechi
         lseek(fd, write_offset, SEEK_SET);
         write(fd, &r, sizeof(report));
