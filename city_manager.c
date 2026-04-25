@@ -45,6 +45,18 @@ void init_district_files(const char *district_name) {
         exit(-1);
     }
 
+    //symlink
+    char link_name[256];
+    sprintf(link_name, "active_reports-%s", district_name);
+
+    //symlink(target, linkpath)
+    //daca link ul exista deja, symlink va returna -1 (cu eroarea EEXIST), dar nu-i problema, doar il ignoram
+    if (symlink(path, link_name) != 0) {
+        if (errno != EEXIST) {
+            printf("Nu s-a putut crea link simbolic %s\n",link_name);
+        }
+    }
+
     sprintf(path, "%s/district.cfg", district_name);
     fd = open(path, O_CREAT | O_RDWR, 0640);//creez district.cfg
     if (fd != -1) {
@@ -65,6 +77,34 @@ void init_district_files(const char *district_name) {
     else {
         printf("Eroare la crearea logged_district\n");
         exit(-1);
+    }
+}
+
+void log_action(const char *district_name, const char *role, const char *user, const char *action) {
+    char path[256];
+    sprintf(path, "%s/logged_district", district_name);
+
+    struct stat st = {0};
+    if (stat(path, &st) != -1) {
+        //dacaa userul e inspector si bitul de scriere pe grup (S_IWGRP) lipseste (fisierul e 644)
+        if (strcmp(role, "inspector") == 0 && !(st.st_mode & S_IWGRP)) {
+            //nu printez nimic ca sa nu stric flow ul, dar dau return ca sa NU scrie in fisier
+            return;
+        }
+    }
+    int fd = open(path, O_WRONLY | O_APPEND);
+    if (fd != -1) {
+        time_t now = time(NULL);
+        char *timestamp = ctime(&now);
+        timestamp[strcspn(timestamp, "\n")] = '\0';//scot \n de la ctime
+
+        //un buffer ca sa construiesc toata propozitia
+        char log_buffer[512];
+        sprintf(log_buffer, "[%s] User: %s (%s) - Action: %s\n", timestamp, user, role, action);
+
+        //folosesc write, numar cate caractere are propozitia
+        write(fd, log_buffer, strlen(log_buffer));
+        close(fd);
     }
 }
 
@@ -498,10 +538,12 @@ int main(int argc, char *argv[])
     if (strcmp(command, "--add") == 0) {
         printf("Comanda add.\n");
         add(target_district, current_user);
+        log_action(target_district, current_role, current_user, "add");
     }
     else if (strcmp(command, "--list") == 0) {
         printf("Comanda list.\n");
         list(target_district);
+        log_action(target_district, current_role, current_user, "list");
     }
     else if (strcmp(command, "--view") == 0) {
         if (argc < 8) {
@@ -511,6 +553,7 @@ int main(int argc, char *argv[])
         int report_id = atoi(argv[7]);//convertim din text in numar
         printf("Comanda view cu ID-ul %d.\n",report_id);
         view(target_district, report_id);
+        log_action(target_district, current_role, current_user, "view");
     }
     else if (strcmp(command, "--remove_report") == 0) {
         if (argc < 8) {
@@ -524,6 +567,7 @@ int main(int argc, char *argv[])
         int report_id = atoi(argv[7]);//convertim din text in numar
         printf("Comanda remove_report cu ID-ul %d.\n",report_id);
         remove_report(target_district, report_id);
+        log_action(target_district, current_role, current_user, "remove_report");
     }
     else if (strcmp(command, "--update_threshold") == 0) {
         if (argc < 8) {
@@ -537,6 +581,7 @@ int main(int argc, char *argv[])
         int value = atoi(argv[7]);
         printf("Actualizez treshold la valoarea %d.\n",value);
         update_treshold(target_district, value);
+        log_action(target_district, current_role, current_user, "update_threshold");
     }
     else if (strcmp(command, "--filter") == 0) {
         if (argc < 8) {
@@ -546,6 +591,7 @@ int main(int argc, char *argv[])
         printf("Comanda filter.\n");
         int condition_count = argc - 7;
         filter(target_district, condition_count, &argv[7]);
+        log_action(target_district, current_role, current_user, "filter");
         }
     else {
         printf("Comanda nacunoscuta (%s) !\n",command);
