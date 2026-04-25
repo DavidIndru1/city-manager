@@ -112,7 +112,7 @@ void add(char *district_name, char *user_name) {
         write(fd, &r, sizeof(report));
         close(fd);
 
-        chmod(path, 0644);//setez permisiunea fisierului pe 664
+        chmod(path, 0664);//setez permisiunea fisierului pe 664
         printf("Raportul cu ID %d a fost adaugat cu succes in districtul %s!\n", r.id, district_name);
     }
     else {
@@ -288,6 +288,181 @@ void remove_report(char *district_name, int report_id) {
     close(fd);
 }
 
+void update_treshold(char *district_name, int value) {
+    char path[256];
+    sprintf(path, "%s/district.cfg", district_name);
+
+    //apelez stat ca sa extrag informatiile fisierului inainte de a scrie
+    struct stat st = {0};
+    if (stat(path, &st) == -1) {
+        printf("eroare stat update_treshold!!\n");
+        exit(-1);
+    }
+
+    //st_mode & 0777 extrage nr octal al permisiunilor curente
+    if ((st.st_mode & 0777) != 0640) {
+        printf("Eroare de securitate\n");
+        printf("Permisiunile fisierului %s au fost compromise\n",path);
+        printf("M-am asteptat la 640 | Am gasit %o\n",st.st_mode & 0777);
+        printf("S-a refuzat operatiunea update_treshold\n");
+        exit(-1);
+    }
+
+    int fd = open(path, O_WRONLY | O_TRUNC);
+    if (fd == -1) {
+        printf("eroare open update_treshold\n");
+        exit(-1);
+    }
+
+    if (write(fd, &value, sizeof(value)) != sizeof(value)) {
+        printf("eroare write update_treshold\n");
+        exit(-1);
+    }
+
+    fchmod(fd, 0640);
+    close(fd);
+    printf("pragul pentru districtul %s a fost actulizat cu succes la valoarea: %d\n",district_name,value);
+}
+
+int parse_condition(const char *input, char *field, char *op, char *value) {
+    //caut primul caracter ':' in sirul de caractere 'input'
+    //strchr returneaza un pointer catre locul unde a gasit ':'
+    const char *colon1 = strchr(input, ':');
+
+    //daca nu exista niciun ':', conditia e gresita si ne oprim
+    if (colon1 == NULL) {
+        printf("introdus date gresit, precum nu s-a pus primul ':' la filter (parse_condition)\n");
+        return 0;
+    }
+
+    //caut al 2-lea ':' incepand de la pozitia de dupa primul ':' (colon1 + 1)
+    const char *colon2 = strchr(colon1 + 1, ':');
+    if (colon2 == NULL) {
+        printf("nu s-a gasit al doilea ':' la filter!\n");
+        return 0;
+    }
+
+    //am sa extrag campul field (tot ce este inainte de primul ':')
+    //adresa lui colon1 - input va da lungimea primului cuvant
+    int field_len = colon1 - input;
+    strncpy(field, input, field_len);
+    //copiez primele 'field_len' litere in variabila 'field'
+    field[field_len] = '\0';//pun la final '\0' pentru a-l face un string valid in C
+
+    //extrag operatorul op , intre primul si al 2-ela ':'
+    int op_len = colon2 - (colon1 + 1);
+    strncpy(op, colon1 + 1, op_len);//copiez literele operatorului
+    op[op_len] = '\0';//inchid stringul
+
+    //extrag value, de la al 2-ela ':' pana la final
+    strcpy(value, colon2 + 1);
+
+    //am reusit sa sparg in 3 bucati, return 1
+    return 1;
+}
+
+int match_condition(report *r, const char *field, const char *op, const char *value) {
+    //verific campul severity (tip numeric: int)
+    if (strcmp(field,"severity")==0) {
+        //valoarea a fost citita ca text, trebuie s-o transform in nr intreg
+        int num_value = atoi(value);
+
+        //verific daca operatorul este cerut si fac comparatia matematica
+        if (strcmp(op, "==")==0)return r->severity == num_value;
+        if (strcmp(op, "!=")==0)return r->severity != num_value;
+        if (strcmp(op, ">")==0)return r->severity > num_value;
+        if (strcmp(op, "<")==0)return r->severity < num_value;
+        if (strcmp(op, "<=")==0)return r->severity <= num_value;
+        if (strcmp(op, ">=")==0)return r->severity >= num_value;
+    }
+    //verific campul category (tip text: string)
+    else if (strcmp(field,"category")==0) {
+        //daca strcmp returneaza 0, inseamna ca textele sunt identice
+        if (strcmp(op, "==") == 0)return strcmp(r->issue_category, value) == 0;
+        if (strcmp(op, "!=") == 0)return strcmp(r->issue_category, value) != 0;
+        //operatiile <,> etc nu au sens logic pentru categoriile in acest proiect, asa ca nu le prindem
+    }
+    //verific campul insepctor (tip text: string)
+    else if (strcmp(field,"inspector")==0) {
+        if (strcmp(op, "==") == 0)return strcmp(r->inspector_name, value) == 0;
+        if (strcmp(op, "!=") == 0)return strcmp(r->inspector_name, value) != 0;
+    }
+    //verific campul timestamp (tip numeric: time_t)
+    else if (strcmp(field,"timestamp")==0) {
+        //transform textul in nr de tip long si il convertesc fortat in time_t
+        time_t time_value = (time_t)atol(value);
+
+        if (strcmp(op, "==") == 0)return r->timestamp == time_value;
+        if (strcmp(op, "!=") == 0)return r->timestamp != time_value;
+        if (strcmp(op, ">") == 0)return r->timestamp > time_value;
+        if (strcmp(op, "<") == 0)return r->timestamp < time_value;
+        if (strcmp(op, "<=") == 0)return r->timestamp <= time_value;
+        if (strcmp(op, ">=") == 0)return r->timestamp >= time_value;
+    }
+    //daca am ajuns aici inseamna ca utilizatorul a introdus un camp necunoscut
+    //sau un operator invalid pentru acel camp. returnez 0
+    return 0;
+}
+
+void filter(char *disctrict_name, int condition_count, char *conditions[]) {
+    char path[256];
+    sprintf(path, "%s/reports.dat", disctrict_name);
+
+    //deschid fisierul doar pentru citire
+    int fd = open(path, O_RDONLY);
+    if (fd == -1) {
+        printf("eroare la deschiderea fisierului pentru filter!!!\n");
+        exit(-1);
+    }
+
+    report r = {0};
+    int found_any = 0; //sa vad daca am printat macar un raport
+    while (read(fd, &r, sizeof(report)) == sizeof(report)) {
+        int passes_all = 1; //presupun initial ca raportul trece testul
+
+        //trec raportul prin toate conditiile posibile
+        for (int i = 0; i < condition_count; i++) {
+            char field[32] = {0}, op[4] = {0}, value[128] = {0};
+            //daca parse_condition returneaza 1, a reusit sa sparga textul in 3 bucati
+            if (parse_condition(conditions[i], field, op, value)) {
+                //acum verific daca raportul curent se potriveste cu bucatile
+                if (match_condition(&r, field, op, value)==0) {
+                    passes_all = 0;//a picat conditia
+                    break;//opresc verificarea
+                }
+            }
+            else {
+                printf("eroare, conditia %s este invalida!!!\n",conditions[i]);
+                close(fd);
+                exit(-1);
+            }
+        }
+        //dupa ce am verificat toate conditiile, 'passes all' a ramas 1, voi printa
+        if (passes_all==1) {
+            found_any = 1;
+
+            printf("--- Raport ID: %d ---\n", r.id);
+            printf("Inspector : %s\n", r.inspector_name);
+            printf("Categorie : %s (Severitate: %d)\n", r.issue_category, r.severity);
+            printf("GPS       : [%.4f, %.4f]\n", r.latitude, r.longitude);
+
+            char time_str[64];
+            strcpy(time_str, ctime(&r.timestamp));
+            time_str[strcspn(time_str, "\n")] = '\0';
+
+            printf("Data      : %s\n", time_str);
+            printf("Descriere : %s\n", r.description);
+            printf("---------------------\n");
+        }
+    }
+
+    //daca am ajuns la final si nu a trecut nimic de filtre
+    if (found_any==0) {
+        printf("niciun raport nu corespunde filtrelor in disctrictul %s.\n",disctrict_name);
+    }
+    close(fd);
+}
+
 int main(int argc, char *argv[])
 {
     if(argc < 7)
@@ -332,7 +507,7 @@ int main(int argc, char *argv[])
         }
         int report_id = atoi(argv[7]);//convertim din text in numar
         printf("Comanda view cu ID-ul %d.\n",report_id);
-        //functia view
+        view(target_district, report_id);
     }
     else if (strcmp(command, "--remove_report") == 0) {
         if (argc < 8) {
@@ -358,22 +533,20 @@ int main(int argc, char *argv[])
         }
         int value = atoi(argv[7]);
         printf("Actualizez treshold la valoarea %d.\n",value);
-        //functia update treshold
+        update_treshold(target_district, value);
     }
     else if (strcmp(command, "--filter") == 0) {
         if (argc < 8) {
             printf("eroare! lipseste condition pentru filter !\n");
             exit(-1);
         }
-        char *condition = argv[7];
         printf("Comanda filter.\n");
-        for (int i = 7 ; i < argc ; i++) {
-            char *current_condition_filter = argv[i];
-            //functia filter
-            }
+        int condition_count = argc - 7;
+        filter(target_district, condition_count, &argv[7]);
         }
     else {
         printf("Comanda nacunoscuta (%s) !\n",command);
         exit(-1);
     }
+    return 0;
 }
