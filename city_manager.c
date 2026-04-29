@@ -277,7 +277,7 @@ void remove_report(char *district_name, int report_id) {
 
     int fd = open(path, O_RDWR);
     if (fd == -1) {
-        printf("eroare la deschiderea reports.dat pentru stergere!!\n");
+        printf("eroare la deschiderea reports.dat pentru stergerea ID-ului!!\n");
         exit(-1);
     }
 
@@ -506,6 +506,17 @@ void filter(char *disctrict_name, int condition_count, char *conditions[]) {
     close(fd);
 }
 
+void remove_district(char *district_name){
+    char path[256];
+    sprintf(path, "%s/reports.dat", disctrict_name);
+
+    int fd = open(path, O_RDWR);
+    if(fd == -1) {
+        printf("eroare la deschiderea reports.dat pentru stergerea districtului !!\n");
+        exit(-1);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if(argc < 7)
@@ -592,9 +603,18 @@ int main(int argc, char *argv[])
         int condition_count = argc - 7;
         filter(target_district, condition_count, &argv[7]);
         log_action(target_district, current_role, current_user, "filter");
+    }
+    else if (strcmp(command, "--remove_district") == 0) {
+        if(strcmp(current_role,"manager")!=0) {
+            printf("eroare de permisiune! numai managerii pot sterge districturi !\n");
+            exit(-1);
         }
+        printf("Comanda remove_district.\n");
+        remove_district(target_district);
+        log_action(target_district, current_role, current_user, "remove_district");
+    }
     else {
-        printf("Comanda nacunoscuta (%s) !\n",command);
+        printf("Comanda necunoscuta (%s) !\n",command);
         exit(-1);
     }
     return 0;
