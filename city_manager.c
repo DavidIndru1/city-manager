@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 typedef struct report
 {
@@ -507,13 +508,41 @@ void filter(char *disctrict_name, int condition_count, char *conditions[]) {
 }
 
 void remove_district(char *district_name){
-    char path[256];
-    sprintf(path, "%s/reports.dat", disctrict_name);
+    //sterg linkul folosind unlink()
+    char link_name[256];
+    sprintf(link_name, "active_reports-%s", district_name);
+    if (unlink(link_name) == 0) {
+        printf("Linkul simbolic '%s' a fost sters.\n", link_name);
+    }
+    else {
+        printf("nu s-a putut sterge linkul simbolic, poate ca nu exista.\n");
+    }
+    //folosesc fork()
+    pid_t pid = fork();
 
-    int fd = open(path, O_RDWR);
-    if(fd == -1) {
-        printf("eroare la deschiderea reports.dat pentru stergerea districtului !!\n");
+    if (pid < 0) {
+        //daca fork() < 0, a aparut o eroare
+        printf("eroare fork() !\n");
         exit(-1);
+    }
+    else if (pid == 0) {
+        //ma aflu in procesul fiu (pid==0)
+        printf("Proces copil pornit. Se sterge complet districtul '%s'...\n",district_name);
+        //folosesc execlp pentru a inlocui procesul copil cu comanda 'rm -rf'
+        //primul argument este comanda 'rm', urmat de 'rm'
+        //apoi 'rf' apoi folderul si la final NULL
+        execlp("rm", "rm", "-rf", district_name, NULL);
+
+        //daca execlp functioneaza, copilul dispare.
+        //linia asta se va executa DOAR daca execlp da eroare
+        printf("eroare!! execlp a esuat!!\n");
+        exit(-1);
+    }
+    else {
+        //sunt in procesul de parinte
+        //astept ca procesul fiu sa se termine pentru a citi starea
+        wait(NULL);
+        printf("operatiune incheiata: districtul %s a fost sters cu succes de catre copil!\n", district_name);
     }
 }
 
@@ -611,7 +640,7 @@ int main(int argc, char *argv[])
         }
         printf("Comanda remove_district.\n");
         remove_district(target_district);
-        log_action(target_district, current_role, current_user, "remove_district");
+        //aici nu mai apelez log, pentru ca fisierul logged_district va fi sters fizic impreuna cu tot directorul
     }
     else {
         printf("Comanda necunoscuta (%s) !\n",command);
