@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 typedef struct report
 {
@@ -570,7 +571,10 @@ int main(int argc, char *argv[])
     char *command = argv[5]; // va fi --add, --list etc
     char *target_district = argv[6]; //va fi de ex: "downtown"
 
-    init_district_files(target_district);
+    // initializez fisierele DOAR daca nu apelam comanda de stergere totala
+    if (strcmp(command, "--remove_district") != 0) {
+        init_district_files(target_district);
+    }
 
     printf("Rol: %s | User: %s\n", current_role, current_user);
     printf("Command: %s | Target: %s\n", command, target_district);
@@ -578,7 +582,39 @@ int main(int argc, char *argv[])
     if (strcmp(command, "--add") == 0) {
         printf("Comanda add.\n");
         add(target_district, current_user);
-        log_action(target_district, current_role, current_user, "add");
+
+        //logica pentru phase 2, notificarea monitorului
+        int monitor_notified =  0;//asta este o presupunere ca initial notificarea va esua
+
+        //caut fisierul .monitor_pid
+        int fd_pid = open(".monitor_pid", O_RDONLY);
+        if (fd_pid != -1) {
+            char pid_buf[32] = {0};//un buffer mic in care citesc PID
+            if (read(fd_pid, pid_buf, sizeof(pid_buf)-1) > 0) {
+                //am reusit sa citesc din fisier, convertesc textul in intreg
+                pid_t monitor_pid = atoi(pid_buf);
+
+                //trimit semnalul SIGUSR1 catre PID-ul gasit, folosind kill()
+                //daca kill() returneaza 0, semnalul a ajuns cu succes
+                if (kill(monitor_pid, SIGUSR1) == 0) {
+                    monitor_notified = 1;//succes
+                }
+            }
+            close(fd_pid);
+        }
+
+        //pregatirea mesajului pentru log
+        char log_msg[256];
+        if (monitor_notified == 1) {
+            //afisez un mesaj de confirmare
+            strcpy(log_msg, "add - Notificare monitor: SUCCES");
+        }
+        else {
+            //daca fisierul nu exista sau trimiterea a esuat, notez explicit
+            strcpy(log_msg, "add - Notificare monitor: ESUATA (Monitorul nu a putut fi gasit/contactat)");
+        }
+
+        log_action(target_district, current_role, current_user, log_msg);
     }
     else if (strcmp(command, "--list") == 0) {
         printf("Comanda list.\n");
