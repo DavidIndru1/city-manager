@@ -34,6 +34,21 @@ void handle_signal(int sig) {
 }
 
 int main(){
+
+    setbuf(stdout,NULL);
+    int verificare_fd = open(".monitor_pid",O_RDONLY);
+    if(verificare_fd != -1){
+        char buf[32];
+        ssize_t n = read(verificare_fd, buf, sizeof(buf)-1);
+        if(n>0){
+            buf[n] = '\0';
+            printf("eroare, monitorul ruleaza deja pid-ul %s",buf);
+            close(verificare_fd);
+            return 1;
+        }
+        close(verificare_fd);
+    }
+
     //cele 4 linii de sigaction facute cu AI
     struct sigaction sa;//declar functia
     sa.sa_handler = handle_signal;//setez functia de tratare
